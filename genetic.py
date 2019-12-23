@@ -27,7 +27,18 @@ bmarks = "bmarks/s27.v bmarks/s420.v"
 # import glob
 # bmarks = " ".join(glob.glob("bmarks/s*.v"))
 
-### Mutating ###
+### Function Definitions ###
+
+## Crossing ##
+# The 'cross' function takes two scripts 'a' and 'b' and creates a new 'child' script that
+# is a cross of the two. Modify this function to change how scripts are mixed together.
+
+def cross(a, b):
+    a_end = random.randrange(len(a))
+    b_start = random.randrange(len(b))
+    return a[:a_end] + b[b_start:]
+
+## Mutating ##
 # The 'mutate' function takes a script and introduces mutations with a certain probability.
 # Modify this function to change how mutations are introduced.
 
@@ -50,16 +61,7 @@ def mutate(p, chance=0.1):
             p[i] = random_command()
     return p
 
-### Crossing ###
-# The 'cross' function takes two scripts 'a' and 'b' and creates a new 'child' script that
-# is a cross of the two. Modify this function to change how scripts are mixed together.
-
-def cross(a, b):
-    a_end = random.randrange(len(a))
-    b_start = random.randrange(len(b))
-    return a[:a_end] + b[b_start:]
-
-### Attempt to make a script created by crossing + mutation conform to some rules. ###
+## Attempt to make a script created by crossing + mutation conform to some rules. ##
 # The 'canonify' function can modify a new script in some way before adding it to the
 # population. This is useful e.g. to ensure that abc9 always prints delay information for
 # use in the evaluation function.
@@ -172,7 +174,7 @@ def select_best(population, popcap=10):
 
 def run(clean=True):
     # initialize the RNG
-    if random_seed:
+    if random_seed != None:
         random.seed(random_seed)
 
     if clean:
