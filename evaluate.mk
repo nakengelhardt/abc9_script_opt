@@ -1,4 +1,4 @@
-YOSYS=$(HOME)/Source/yosys/yosys
+YOSYS=$(HOME)/Work/yosys-clean/yosys
 
 BMARK_FOLDER=bmarks/
 BMARKS?=$(wildcard $(BMARK_FOLDER)s*.v)
@@ -7,7 +7,6 @@ ILFILES:=$(BMARKS:.v=.il)
 SCRIPTFILES:=$(wildcard scripts/*.abc9)
 SCRIPTS:=$(basename $(notdir $(SCRIPTFILES)))
 LOGS:=$(foreach s,$(SCRIPTS),logs/$(s).log)
-STATS:=$(foreach s,$(SCRIPTS),logs/$(s).stat)
 RESULTS:=$(foreach s,$(SCRIPTS),logs/$(s).res)
 
 all: results

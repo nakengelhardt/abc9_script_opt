@@ -10,9 +10,14 @@ children_per_generation = 16    # number of scripts created for evaluation in ev
 survivors_per_generation = 8    # number of scripts to keep after evaluation
 assert(survivors_per_generation < children_per_generation)
 
-mutation_chance = 0.1           # likelihood of the 'mutate' function introducing a mutation in a script
+mutation_chance = 0.2           # likelihood of the 'mutate' function introducing a mutation in a script
 assert (mutation_chance >= 0 and mutation_chance < 1)
 random_seed = 42                # for reproducibility. Set to None to get different results each run
+
+# Note: The following scripts get canonified before use!
+
+# Baseline. Results for this script can be used as a reference in the evaluation function
+baseline = ["&st;", "&scorr;", "&sweep;", "&dc2;", "&st;", "&dch -f;", "&if -W 300 -v;"]
 
 initial_population = [          # Starting population. Initialize with some known good scripts
     ["&st;", "&scorr;", "&sweep;", "&dc2;", "&st;", "&dch -f;", "&if -W 300 -v;", "&mfs;"],
@@ -22,10 +27,10 @@ initial_population = [          # Starting population. Initialize with some know
 
 ### Benchmarks to use for evaluation ###
 ## small set for testing
-bmarks = "bmarks/s27.v bmarks/s420.v"
+# benchmarks = ["bmarks/s27.v", "bmarks/s420.v"]
 ## the whole iscas89 benchmark suite
-# import glob
-# bmarks = " ".join(glob.glob("bmarks/s*.v"))
+import glob
+benchmarks = glob.glob("bmarks/s*.v") # (excludes dff.v)
 
 ### Function Definitions ###
 
@@ -42,22 +47,35 @@ def cross(a, b):
 # The 'mutate' function takes a script and introduces mutations with a certain probability.
 # Modify this function to change how mutations are introduced.
 
-commands = [
- "&st;", "&scorr;", "&sweep;", "&syn2;", "&synch2;",
- "&dc2;", "&dch -f;", "&mfs;",
- "&if -W 300;",
- "&if -W 300 -K 4;", "&if -W 300 -K 6;", "&if -W 300 -K 8;",
- "&if -g -K 4;", "&if -g -K 6;", "&if -g -K 8;",
- "&if -m -a -K 6 -W 300;", "&if -m -a -W 300;",
- "&save;", "&load;"
-]
+commands = {
+    "&if -W 300" : [[" -K 4", " -K 5", " -K 6", " -K 8"], " -m", " -g", " -x", " -a", [" -C 8", " -C 16", " -C 32", " -C 64"]],
+    "&st" : [],
+    "&scorr" : [],
+    "&sweep" : [],
+    "&syn2" : [],
+    "&syn3" : [],
+    "&syn4" : [],
+    "&synch2" : [" -f"],
+    "&dc2" : [],
+    "&dch" : [" -f"],
+    "&save" : [],
+    "&load" : []
+}
 
 def random_command():
-    return random.choice(commands)
+    cmd = random.choice([x for x in commands])
+    res = cmd
+    if commands[cmd]:
+        k = random.randrange(len(commands[cmd])) #TODO: make higher values less likely
+        for opt in random.sample(commands[cmd], k):
+            if isinstance(opt, list):
+                opt = random.choice(opt)
+            res += opt
+    return res + ";"
 
-def mutate(p, chance=0.1):
+def mutate(p):
     for i in range(len(p)):
-        if random.random() < chance:
+        if random.random() < mutation_chance:
             p[i] = random_command()
     return p
 
@@ -74,18 +92,69 @@ def mutate(p, chance=0.1):
 # This function is optional: everything works if it simply returns the input unmodified.
 
 def canonify(c):
+    excluded_commands = {"&mfs;", "&ps;", "&ps -l;", "&verify -s;", "time;"}
+    c = [x for x in c if x not in excluded_commands]
+    last_if = True
     for i in range(len(c) - 1, -1, -1):
-        if c[i] in ["&mfs;", "&save;", "&load;"]:
+        if c[i] == "&save;":
+            last_if = True
             continue
         if c[i].startswith("&if"):
-            r = re.compile(" -K \d+")
-            c[i] = r.sub('', c[i])
+            r = re.compile(" -W \d+")
+            c[i] = r.sub(" -W 300", c[i])
             if c[i].find(" -W 300") < 0:
                 c[i] = c[i].replace(";", " -W 300;")
-            if c[i].find(" -v") < 0:
-                c[i] = c[i].replace(";", " -v;")
-            return c
-    return None
+            if last_if:
+                r = re.compile(" -K \d+")
+                c[i] = r.sub('', c[i])
+                if c[i].find(" -v") < 0:
+                    c[i] = c[i].replace(";", " -v;")
+                last_if = False
+            else:
+                c[i] = c[i].replace(" -v", "")
+    if "&save;" in c:
+        if c[-1] != "&load;":
+            if c[-1] != "&save;":
+                c.append("&save;")
+            c.append("&load;")
+    c.append("time;")
+    c.append("&verify -s;")
+    return c
+
+## Evaluation function
+# This function has two arguments: the results for the script under consideration
+# and the results for the baseline script. Both arguments are a dictionary with
+# the elements of the 'benchmarks' list as keys. The values are dictioaries again,
+# with one entry for each key-value pair returned by get_data.sh
+# The values are kept as strings since they might be int/float or other. Please
+# remember to cast them to the appropriate data type.
+# Raise a ValueError here if some data is absent or not of the expected shape - it
+# will be interpreted as the script not being functional (leading to removal
+# from the population).
+
+# TODO Example of data layout:
+
+# NB: smaller return values are considered better!
+
+from statistics import geometric_mean
+
+def evaluate(script_res, baseline_res):
+    sum = 0
+    ts = 0
+    tb = 0
+    for b in benchmarks:
+        delay = geometric_mean([int(script_res[b]["Del"])/int(baseline_res[b]["Del"]) for b in benchmarks])
+        area = geometric_mean([int(script_res[b]["LCs"])/int(baseline_res[b]["LCs"]) for b in benchmarks])
+        sum += area + delay
+        # abc "time" command doesn't have enough digits for smaller Benchmarks
+        # use overall sum
+        ts += float(script_res[b]["seconds"])
+        tb += float(script_res[b]["seconds"])
+    if tb > 0.0:
+        time_penalty = ts/tb
+    else:
+        time_penalty = ts
+    return sum + 0.1*time_penalty
 
 ###################################################################
 ## Algorithm itself, should be no need to modify below this line ##
@@ -99,15 +168,16 @@ def get_script_hash(script):
     return h.hexdigest()
 
 
-def make_next_gen(population, num=100, chance=0.1):
-    children = []
-    while len(children) < num-len(population):
-        a = random.choice(population)
-        b = random.choice(population)
+def make_next_gen(survivors, num=100, chance=0.1):
+    children = list()
+    # keeping the last generations' best ensures that results don't get worse over time
+    children.extend(survivors)
+    while len(children) < num:
+        a = random.choice(survivors)
+        b = random.choice(survivors)
         c = canonify(mutate(cross(a,b)))
-        if c:
+        if c and c not in children:
             children.append(c)
-    children.extend(population) # keeping the last generations' best ensures that results don't get worse over time
     return children
 
 # write scripts in population to scripts directory
@@ -119,24 +189,47 @@ def dump_pop(population, script_dir='scripts'):
         if not os.path.exists('{}/{}.abc9'.format(script_dir, get_script_hash(p))):
             # only write the script if it doesn't exist yet;
             # otherwise avoid touching the file so make doesn't re-run evaluation
-            with open('{}/{}.abc9'.format(script_dir, get_script_hash(p)), 'w') as f:
+            with open('{}/{}.abc9'.format(script_dir, get_script_hash(p)), 'x') as f:
                 f.write(" ".join(p))
 
 # run evaluation function on the current population
 def run_eval():
-    subprocess.run(['BMARKS="{}" /usr/bin/time make -j8 -f evaluate.mk'.format(bmarks)], shell=True)
+    subprocess.run(['BMARKS="{}" /usr/bin/time make -j8 -f evaluate.mk'.format(" ".join(benchmarks))], shell=True)
+
+def read_results(hash, log_dir='logs'):
+    results = dict()
+    for b in benchmarks:
+        bname, bext = os.path.splitext(os.path.basename(b))
+        with open("{}/{}_{}.res".format(log_dir, hash, bname)) as f:
+            d = dict()
+            for line in f:
+                k,v = (x.strip() for x in line.split("=", maxsplit=1))
+                d[k] = v
+            results[b] = d
+    return results
 
 # get score for script 'p'
 # return value "None" indicates the script is defective in some way (e.g. crashes abc9)
-def evaluate(p):
+def get_score(script, log_dir='logs'):
+    hash = get_script_hash(script)
     try:
-        with open('logs/{}.res'.format(get_script_hash(p))) as f:
-            score = int(f.read())
-            return score
-    except (FileNotFoundError, ValueError):
-        # if the file doesn't exist or does not contain a single int,
+        with open("{}/{}.res".format(log_dir, hash)) as f:
+            t = f.read().strip()
+            if t != "PASS":
+                return None
+            results = read_results(hash)
+            return evaluate(results, baseline_result)
+    except (FileNotFoundError, ValueError) as e:
+        # if the file doesn't exist or does not contain the right values,
         # the script is not functional and should be removed from population.
         return None
+
+def set_baseline():
+    global baseline_result
+    b = canonify(baseline)
+    dump_pop([b])
+    run_eval()
+    baseline_result = read_results(get_script_hash(b))
 
 # select the top scoring scripts
 # smaller scores are better
@@ -145,8 +238,13 @@ def select_best(population, popcap=10):
     run_eval()
     survivors = []
     worst_score = None
+    print("Score\tHash\tScript")
     for p in population:
-        score = evaluate(p)
+        score = get_score(p)
+        if score == None:
+            print("--\t{}\t{}".format(get_script_hash(p), " ".join(p)))
+        else:
+            print("{:.2f}\t{}\t{}".format(score, get_script_hash(p), " ".join(p)))
         if score != None: # eliminate non-functional scripts
             if len(survivors) < popcap:
                 survivors.append((score, p))
@@ -166,10 +264,8 @@ def select_best(population, popcap=10):
         raise ValueError("No functional scripts in population.")
 
     population = []
-    # print("Fittest: ")
     for k in sorted(survivors):
         population.append(k[1])
-    #     print("{}\t{}\t{}".format(k[0], get_script_hash(k[1]), " ".join(k[1])))
     return population
 
 def run(clean=True):
@@ -181,14 +277,14 @@ def run(clean=True):
         # remove existing results that might have been generated with different benchmark set or evaluation function
         subprocess.run(['make -f evaluate.mk clean'], shell=True)
 
+    # get baseline
+    set_baseline()
+
     # run the algorithm
-    population = initial_population
+    population = [canonify(x) for x in initial_population]
     for g in range(generations):
         print("Evaluating generation {}...".format(g))
         population = make_next_gen(population, num=children_per_generation, chance=mutation_chance)
-        # print("New population:")
-        # for p in population:
-        #     print("{}\t{}".format(get_script_hash(p), " ".join(p)))
         population = select_best(population, popcap=survivors_per_generation)
     print("Results:")
     for p in population:
