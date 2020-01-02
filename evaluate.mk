@@ -1,4 +1,4 @@
-YOSYS=$(HOME)/Work/yosys-clean/yosys
+YOSYS?=yosys
 
 BMARK_FOLDER=bmarks/
 BMARKS?=$(wildcard $(BMARK_FOLDER)s*.v)

@@ -6,13 +6,14 @@ import re
 
 ### Parameter Definitions ###
 generations = 20                # number of iterations that the algorithm runs
-children_per_generation = 16    # number of scripts created for evaluation in every iteration
+children_per_generation = 32    # number of scripts created for evaluation in every iteration
 survivors_per_generation = 8    # number of scripts to keep after evaluation
 assert(survivors_per_generation < children_per_generation)
 
 mutation_chance = 0.2           # likelihood of the 'mutate' function introducing a mutation in a script
 assert (mutation_chance >= 0 and mutation_chance < 1)
 random_seed = 42                # for reproducibility. Set to None to get different results each run
+num_proc = 8                    # number of parallel runs for make
 
 # Note: The following scripts get canonified before use!
 
@@ -31,6 +32,9 @@ initial_population = [          # Starting population. Initialize with some know
 ## the whole iscas89 benchmark suite
 import glob
 benchmarks = glob.glob("bmarks/s*.v") # (excludes dff.v)
+
+## Where to find yosys
+yosys_path = "/home/nak/Work/yosys-clean/yosys"
 
 ### Function Definitions ###
 
@@ -139,22 +143,12 @@ def canonify(c):
 from statistics import geometric_mean
 
 def evaluate(script_res, baseline_res):
-    sum = 0
-    ts = 0
-    tb = 0
-    for b in benchmarks:
-        delay = geometric_mean([int(script_res[b]["Del"])/int(baseline_res[b]["Del"]) for b in benchmarks])
-        area = geometric_mean([int(script_res[b]["LCs"])/int(baseline_res[b]["LCs"]) for b in benchmarks])
-        sum += area + delay
-        # abc "time" command doesn't have enough digits for smaller Benchmarks
-        # use overall sum
-        ts += float(script_res[b]["seconds"])
-        tb += float(script_res[b]["seconds"])
-    if tb > 0.0:
-        time_penalty = ts/tb
-    else:
-        time_penalty = ts
-    return sum + 0.1*time_penalty
+    delay = geometric_mean([int(script_res[b]["Del"])/int(baseline_res[b]["Del"]) for b in benchmarks])
+    area = geometric_mean([int(script_res[b]["LCs"])/int(baseline_res[b]["LCs"]) for b in benchmarks])
+    time = geometric_mean([float(script_res[b]["seconds"])/float(baseline_res[b]["seconds"]) for b in benchmarks])
+    # abc "time" command doesn't have enough digits for smaller Benchmarks
+    # use overall sum even if it's bad statistics
+    return area * delay + 0.1 * time
 
 ###################################################################
 ## Algorithm itself, should be no need to modify below this line ##
@@ -194,11 +188,12 @@ def dump_pop(population, script_dir='scripts'):
 
 # run evaluation function on the current population
 def run_eval():
-    subprocess.run(['BMARKS="{}" /usr/bin/time make -j8 -f evaluate.mk'.format(" ".join(benchmarks))], shell=True)
+    subprocess.run(['YOSYS={} BMARKS="{}" make -j{} -f evaluate.mk'.format(yosys_path, " ".join(benchmarks), num_proc)], shell=True)
 
 def read_results(hash, log_dir='logs'):
     results = dict()
     for b in benchmarks:
+        # this is probably a bit fragile, have to extract same name here as in evaluate.sh
         bname, bext = os.path.splitext(os.path.basename(b))
         with open("{}/{}_{}.res".format(log_dir, hash, bname)) as f:
             d = dict()
