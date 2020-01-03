@@ -1,8 +1,8 @@
 YOSYS?=yosys
 
 BMARK_FOLDER=bmarks/
-BMARKS?=$(wildcard $(BMARK_FOLDER)s*.v)
-ILFILES:=$(BMARKS:.v=.il)
+BMARKS?=$(wildcard $(BMARK_FOLDER)*.ys)
+ILFILES:=$(BMARKS:.ys=.il)
 
 SCRIPTFILES:=$(wildcard scripts/*.abc9)
 SCRIPTS:=$(basename $(notdir $(SCRIPTFILES)))
@@ -18,10 +18,9 @@ ilangs: $(ILFILES)
 logs/%.res: scripts/%.abc9 $(ILFILES) | logs
 	@YOSYS="$(YOSYS)" BMARKS="$(ILFILES)" ./evaluate.sh $*
 
-$(BMARK_FOLDER)%.il: $(BMARK_FOLDER)%.v | logs
+$(BMARK_FOLDER)%.il: $(BMARK_FOLDER)%.ys | logs
 	@echo "Generating $@..."
-	@$(YOSYS) -ql logs/$*_il.log -p "read_verilog $(BMARK_FOLDER)dff.v; \
-	read_verilog $<; \
+	$(YOSYS) -ql logs/$*_il.log -p "script $<; \
 	synth_xilinx -flatten -abc9 -run begin:map_luts; \
 	write_ilang $@"
 

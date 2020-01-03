@@ -1,0 +1,2 @@
+read_verilog bmarks/dff.v
+read_verilog bmarks/s27.v

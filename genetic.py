@@ -15,12 +15,14 @@ assert (mutation_chance >= 0 and mutation_chance < 1)
 random_seed = 42                # for reproducibility. Set to None to get different results each run
 num_proc = 8                    # number of parallel runs for make
 
-# Note: The following scripts get canonified before use!
+
+### Note: The following scripts get canonified before use!
 
 # Baseline. Results for this script can be used as a reference in the evaluation function
 baseline = ["&st;", "&scorr;", "&sweep;", "&dc2;", "&st;", "&dch -f;", "&if -W 300 -v;"]
 
-initial_population = [          # Starting population. Initialize with some known good scripts
+# Starting population. Initialize with some known good scripts
+initial_population = [
     ["&st;", "&scorr;", "&sweep;", "&dc2;", "&st;", "&dch -f;", "&if -W 300 -v;", "&mfs;"],
     ["&st;", "&sweep -v;", "&scorr;", "&st;", "&if -W 300;", "&save;", "&st;", "&syn2;", "&if -W 300 -v;", "&save;", "&load;", "&st;", "&if -g -K 6;", "&dch -f;", "&if -W 300 -v;", "&save;", "&load;", "&st;", "&if -g -K 6;", "&synch2;", "&if -W 300 -v;", "&save;", "&load;", "&mfs;"],
     ["&st;", "&synch2;", "&if -m -a -K 6 -W 300;", "&mfs;", "&st;", "&dch;", "&if -m -a -W 300 -v;", "&mfs;"]
@@ -28,10 +30,10 @@ initial_population = [          # Starting population. Initialize with some know
 
 ### Benchmarks to use for evaluation ###
 ## small set for testing
-# benchmarks = ["bmarks/s27.v", "bmarks/s420.v"]
+# benchmarks = ["bmarks/s27.ys", "bmarks/s420.ys"]
 ## the whole iscas89 benchmark suite
 import glob
-benchmarks = glob.glob("bmarks/s*.v") # (excludes dff.v)
+benchmarks = glob.glob("bmarks/*.ys")
 
 ## Where to find yosys
 yosys_path = "/home/nak/Work/yosys-clean/yosys"
@@ -109,11 +111,15 @@ def canonify(c):
             if c[i].find(" -W 300") < 0:
                 c[i] = c[i].replace(";", " -W 300;")
             if last_if:
-                r = re.compile(" -K \d+")
-                c[i] = r.sub('', c[i])
-                if c[i].find(" -v") < 0:
-                    c[i] = c[i].replace(";", " -v;")
-                last_if = False
+                ## The script manages to find a combination of arguments that
+                ## results in outlandishly short delays, so be extra strict on
+                ## the last &if for now
+                # r = re.compile(" -K \d+")
+                # c[i] = r.sub('', c[i])
+                # if c[i].find(" -v") < 0:
+                #     c[i] = c[i].replace(";", " -v;")
+                # last_if = False
+                c[i] = "&if -W 300 -v;"
             else:
                 c[i] = c[i].replace(" -v", "")
     if "&save;" in c:
@@ -136,7 +142,9 @@ def canonify(c):
 # will be interpreted as the script not being functional (leading to removal
 # from the population).
 
-# TODO Example of data layout:
+# Example of data layout:
+# {'bmarks/s27.ys': {'Del': '1010', 'LCs': '4', 'seconds': '0.01'},
+# 'bmarks/s420.ys': {'Del': '2151', 'LCs': '27', 'seconds': '0.01'}}
 
 # NB: smaller return values are considered better!
 
@@ -145,9 +153,11 @@ from statistics import geometric_mean
 def evaluate(script_res, baseline_res):
     delay = geometric_mean([int(script_res[b]["Del"])/int(baseline_res[b]["Del"]) for b in benchmarks])
     area = geometric_mean([int(script_res[b]["LCs"])/int(baseline_res[b]["LCs"]) for b in benchmarks])
+
+    # watch out for too small benchmarks -- if the baseline execution time is less than 0.01s,
+    # this will raise a ValueError and all scripts will be considered nonfunctional
     time = geometric_mean([float(script_res[b]["seconds"])/float(baseline_res[b]["seconds"]) for b in benchmarks])
-    # abc "time" command doesn't have enough digits for smaller Benchmarks
-    # use overall sum even if it's bad statistics
+
     return area * delay + 0.1 * time
 
 ###################################################################
@@ -263,7 +273,7 @@ def select_best(population, popcap=10):
         population.append(k[1])
     return population
 
-def run(clean=True):
+def run(clean=False):
     # initialize the RNG
     if random_seed != None:
         random.seed(random_seed)
@@ -285,5 +295,9 @@ def run(clean=True):
     for p in population:
         print("{} ({})".format(" ".join(p), get_script_hash(p)))
 
+import argparse
 if __name__ == '__main__':
-    run()
+    parser = argparse.ArgumentParser(description='ABC9 script tuning by genetic algorithm')
+    parser.add_argument('--clean', action='store_true')
+    args = parser.parse_args()
+    run(clean=args.clean)
