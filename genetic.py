@@ -36,7 +36,7 @@ import glob
 benchmarks = glob.glob("bmarks/*.ys")
 
 ## Where to find yosys
-yosys_path = "/home/nak/Work/yosys-clean/yosys"
+yosys_path = "yosys"
 
 ### Function Definitions ###
 
@@ -156,7 +156,7 @@ def evaluate(script_res, baseline_res):
 
     # watch out for too small benchmarks -- if the baseline execution time is less than 0.01s,
     # this will raise a ValueError and all scripts will be considered nonfunctional
-    time = geometric_mean([float(script_res[b]["seconds"])/float(baseline_res[b]["seconds"]) for b in benchmarks])
+    time = geometric_mean([(float(script_res[b]["seconds"]) if float(script_res[b]["seconds"]) != 0.0 else 0.01) /(float(baseline_res[b]["seconds"]) if float(baseline_res[b]["seconds"]) != 0.0 else 0.01) for b in benchmarks])
 
     return area * delay + 0.1 * time
 
